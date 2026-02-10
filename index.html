@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Laporan Pembayaran Kolam Pemancingan</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <!-- jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f9; }
+    header { background: #2563eb; color: white; padding: 16px; text-align: center; font-size: 20px; font-weight: bold; }
+    .container { max-width: 1000px; margin: 20px auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    .form-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 15px; }
+    input, select, button { padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+    button { background: #2563eb; color: white; border: none; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    .pdf-btn { background: #16a34a; margin-top: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+    th { background: #f1f5f9; }
+    .total { text-align: right; font-weight: bold; margin-top: 15px; font-size: 18px; }
+    .delete-btn { background: #ef4444; padding: 6px 10px; font-size: 12px; }
+    .login-box { max-width: 400px; margin: 80px auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); text-align: center; }
+  </style>
+</head>
+<body>
+
+  <!-- HALAMAN LOGIN -->
+  <div id="loginPage" class="login-box">
+    <h2>Login Admin</h2>
+    <input type="email" id="email" placeholder="Email admin" /><br /><br />
+    <input type="password" id="password" placeholder="Password" /><br /><br />
+    <button onclick="login()">Login</button>
+  </div>
+
+  <!-- HALAMAN APLIKASI -->
+  <div id="appPage" style="display:none">
+    <header>📊 Laporan Pembayaran Kolam Pemancingan</header>
+
+    <div class="container">
+      <button onclick="logout()" style="float:right;background:#ef4444">Logout</button>
+      <h2>Tambah Data Pembayaran</h2>
+
+      <div class="form-group">
+        <input type="date" id="tanggal" />
+        <input type="text" id="nama" placeholder="Nama Pemancing" />
+        <select id="jenis">
+          <option value="Harian">Harian</option>
+          <option value="Lomba">Lomba</option>
+          <option value="Sewa Kolam">Sewa Kolam</option>
+        </select>
+        <input type="number" id="jumlah" placeholder="Jumlah Bayar (Rp)" />
+        <button onclick="tambahData()">Tambah</button>
+      </div>
+
+      <button class="pdf-btn" onclick="cetakPDF()">📄 Cetak Laporan PDF</button>
+
+      <h2>Data Pembayaran</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Tanggal</th>
+            <th>Nama</th>
+            <th>Jenis</th>
+            <th>Jumlah (Rp)</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="tabelData"></tbody>
+      </table>
+
+      <div class="total" id="totalBayar">Total: Rp 0</div>
+    </div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyD_aa0mXoyNcGvJbHBg_mAS2n3u7eylUY4",
+      authDomain: "laporan-kolam-pemancingan.firebaseapp.com",
+      projectId: "laporan-kolam-pemancingan",
+      storageBucket: "laporan-kolam-pemancingan.firebasestorage.app",
+      messagingSenderId: "104243967608",
+      appId: "1:104243967608:web:536b7f30472a78ab42df8d"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    function formatRupiah(angka) {
+      return angka.toLocaleString("id-ID");
+    }
+
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        document.getElementById("loginPage").style.display = "none";
+        document.getElementById("appPage").style.display = "block";
+        renderTabel();
+      } else {
+        document.getElementById("loginPage").style.display = "block";
+        document.getElementById("appPage").style.display = "none";
+      }
+    });
+
+    function login() {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+
+      auth.signInWithEmailAndPassword(email, password)
+        .catch(err => alert("Login gagal: " + err.message));
+    }
+
+    function logout() {
+      auth.signOut();
+    }
+
+    async function renderTabel() {
+      const tabel = document.getElementById("tabelData");
+      tabel.innerHTML = "";
+
+      let total = 0;
+      const snapshot = await db.collection("pembayaran").orderBy("tanggal").get();
+
+      snapshot.forEach(doc => {
+        const item = doc.data();
+        total += Number(item.jumlah);
+
+        tabel.innerHTML += `
+          <tr>
+            <td>${item.tanggal}</td>
+            <td>${item.nama}</td>
+            <td>${item.jenis}</td>
+            <td>Rp ${formatRupiah(Number(item.jumlah))}</td>
+            <td><button class="delete-btn" onclick="hapusData('${doc.id}')">Hapus</button></td>
+          </tr>
+        `;
+      });
+
+      document.getElementById("totalBayar").innerText = "Total: Rp " + formatRupiah(total);
+    }
+
+    async function tambahData() {
+      const tanggal = document.getElementById("tanggal").value;
+      const nama = document.getElementById("nama").value;
+      const jenis = document.getElementById("jenis").value;
+      const jumlah = document.getElementById("jumlah").value;
+
+      if (!tanggal || !nama || !jumlah) {
+        alert("Mohon lengkapi semua data!");
+        return;
+      }
+
+      await db.collection("pembayaran").add({ tanggal, nama, jenis, jumlah });
+
+      document.getElementById("tanggal").value = "";
+      document.getElementById("nama").value = "";
+      document.getElementById("jumlah").value = "";
+
+      renderTabel();
+    }
+
+    async function hapusData(id) {
+      if (confirm("Yakin ingin menghapus data ini?")) {
+        await db.collection("pembayaran").doc(id).delete();
+        renderTabel();
+      }
+    }
+
+    async function cetakPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      doc.text("Laporan Pembayaran Kolam Pemancingan", 14, 15);
+
+      let y = 30;
+      let total = 0;
+
+      const snapshot = await db.collection("pembayaran").orderBy("tanggal").get();
+
+      snapshot.forEach((d, i) => {
+        const item = d.data();
+        const text = `${i + 1}. ${item.tanggal} | ${item.nama} | ${item.jenis} | Rp ${formatRupiah(Number(item.jumlah))}`;
+        doc.text(text, 14, y);
+        y += 8;
+        total += Number(item.jumlah);
+      });
+
+      doc.text(`Total Pembayaran: Rp ${formatRupiah(total)}`, 14, y + 10);
+      doc.save("laporan-pemancingan.pdf");
+    }
+  </script>
+</body>
+</html>
